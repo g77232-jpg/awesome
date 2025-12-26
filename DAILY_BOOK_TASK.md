@@ -32,4 +32,4 @@ python3 generate_book_primer.py
 
 ---
 
-*Generated: December 26, 2025 at 19:13 UTC*
+*Generated: December 26, 2025 at 19:15 UTC*
