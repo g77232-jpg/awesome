@@ -1,6 +1,6 @@
 # Book Primer Summary
 
-*Last updated: December 26, 2025 at 19:13 UTC*
+*Last updated: December 26, 2025 at 19:15 UTC*
 
 This page contains a chronologically sorted list of essential books, automatically updated daily.
 
