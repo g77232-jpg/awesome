@@ -15,8 +15,12 @@ if [ -z "$REPO_TO_LINT" ]; then
 	echo "No new link found in the format:  https://....#readme"
 else
 	echo "Cloning $REPO_TO_LINT"
-	mkdir cloned
+	mkdir -p cloned
 	cd cloned
-	git clone "$REPO_TO_LINT" .
-	npx awesome-lint
+	if git clone "$REPO_TO_LINT" .; then
+		npx awesome-lint
+	else
+		echo "Error: Failed to clone repository $REPO_TO_LINT"
+		exit 1
+	fi
 fi
