@@ -1,0 +1,41 @@
+name: Test Repository Linter
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/repo_linter.sh'
+      - '.github/workflows/repo_linter.test.sh'
+      - '.github/workflows/test_repo_linter.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repo_linter.sh'
+      - '.github/workflows/repo_linter.test.sh'
+      - '.github/workflows/test_repo_linter.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Run repo_linter.sh tests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install BATS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats
+
+      - name: Make test file executable
+        run: chmod +x .github/workflows/repo_linter.test.sh
+
+      - name: Run tests
+        run: bats --timing .github/workflows/repo_linter.test.sh
+
+      - name: Run tests with TAP output
+        if: always()
+        run: bats --tap .github/workflows/repo_linter.test.sh
