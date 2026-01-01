@@ -19,11 +19,10 @@
 	<br>
 	<hr>
 	<p>
-		<p>
-			<sup>
-				<a href="https://github.com/sponsors/sindresorhus">My open source work is supported by the community</a>
-			</sup>
-		</p>
+		<sup>
+			<a href="https://github.com/sponsors/sindresorhus">My open source work is supported by the community</a>
+		</sup>
+		<br>
 		<sup>Special thanks to:</sup>
 		<br>
 		<br>
