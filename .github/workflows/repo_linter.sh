@@ -3,8 +3,13 @@
 # Strict error handling: exit on error, undefined variables, and pipe failures
 set -euo pipefail
 
+# Enable debug mode if DEBUG environment variable is set
+if [ "${DEBUG:-0}" = "1" ]; then
+    set -x
+fi
+
 # Constants
-readonly CLONE_DIR="cloned"
+readonly CLONE_DIR="${PWD}/cloned"
 readonly MAIN_BRANCH="origin/main"
 readonly README_FILE="readme.md"
 
@@ -29,7 +34,7 @@ extract_repo_url() {
 }
 
 # Function: Validate repository URL
-# Ensures the URL is non-empty and points to GitHub
+# Ensures the URL is non-empty, properly formatted, and points to GitHub
 validate_repo_url() {
     local url="$1"
 
@@ -37,9 +42,21 @@ validate_repo_url() {
         return 1
     fi
 
-    # Verify it's a GitHub URL
-    if [[ ! "${url}" =~ ^https://github\.com/ ]]; then
-        echo "Error: Invalid GitHub URL: ${url}" >&2
+    # Verify it's a properly formatted GitHub repository URL
+    if [[ ! "${url}" =~ ^https://github\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$ ]]; then
+        echo "Error: Invalid GitHub URL format: ${url}" >&2
+        return 1
+    fi
+
+    # Check for shell metacharacters that could cause issues
+    if [[ "${url}" =~ [\;\&\|\`\$\(\)] ]]; then
+        echo "Error: URL contains dangerous characters: ${url}" >&2
+        return 1
+    fi
+
+    # Check URL length (reasonable limit to prevent abuse)
+    if [ ${#url} -gt 200 ]; then
+        echo "Error: URL exceeds maximum length: ${url}" >&2
         return 1
     fi
 
@@ -69,6 +86,7 @@ setup_clone_directory() {
 # Clones the repository into the clone directory and runs the linter
 clone_and_lint() {
     local repo_url="$1"
+    local lint_exit_code
 
     echo "Cloning ${repo_url}"
 
@@ -78,14 +96,50 @@ clone_and_lint() {
         return 1
     fi
 
+    # Verify clone succeeded and directory is not empty
+    if [ ! -d "${CLONE_DIR}" ]; then
+        echo "Error: Clone directory does not exist after clone" >&2
+        return 1
+    fi
+
+    if [ -z "$(ls -A "${CLONE_DIR}" 2>/dev/null)" ]; then
+        echo "Error: Clone directory is empty" >&2
+        return 1
+    fi
+
+    echo "Running linter..."
+
     # Run linter in the cloned directory with timeout protection (10 minutes max)
-    # Using subshell to preserve pwd
+    # Using subshell to preserve pwd, capture exit code for proper error handling
     (cd "${CLONE_DIR}" && timeout 600 npx awesome-lint)
+    lint_exit_code=$?
+
+    if [ ${lint_exit_code} -eq 124 ]; then
+        echo "Error: Linter timeout exceeded (10 minutes)" >&2
+        return ${lint_exit_code}
+    elif [ ${lint_exit_code} -ne 0 ]; then
+        echo "Error: Linter failed with exit code ${lint_exit_code}" >&2
+        return ${lint_exit_code}
+    fi
+
+    return 0
+}
+
+# Function: Cleanup on exit or error
+# Removes the clone directory to prevent disk space accumulation
+cleanup() {
+    if [ -d "${CLONE_DIR}" ]; then
+        echo "Cleaning up clone directory..."
+        rm -rf "${CLONE_DIR}" 2>/dev/null || true
+    fi
 }
 
 # Main execution flow
 main() {
     local repo_to_lint
+
+    # Setup cleanup trap to run on EXIT or error
+    trap cleanup EXIT ERR
 
     # Step 0: Check required commands are available
     for cmd in git grep sed head npx timeout; do
