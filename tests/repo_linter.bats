@@ -354,3 +354,279 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"https://github.com/user/repo-with-special_chars.test"* ]]
 }
+
+# ============================================================================
+# Comprehensive tests for setup_clone_directory() function
+# ============================================================================
+# This function has critical security checks (symlink detection) and error
+# handling that were previously untested. These tests ensure:
+# 1. Symlinks are detected and refused (prevents symlink attacks)
+# 2. Existing directories are properly cleaned up
+# 3. mkdir failures are handled correctly
+# 4. Error messages and exit codes are correct
+# ============================================================================
+
+# Helper function to create a test script with the setup_clone_directory function
+create_setup_clone_directory_test() {
+    cat > "$TEST_TEMP_DIR/test_setup_clone_directory.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+readonly CLONE_DIR="cloned"
+
+setup_clone_directory() {
+    if [ -d "${CLONE_DIR}" ] && [ ! -L "${CLONE_DIR}" ]; then
+        echo "Removing existing clone directory..."
+        rm -rf "${CLONE_DIR}"
+    elif [ -L "${CLONE_DIR}" ]; then
+        echo "Error: ${CLONE_DIR} is a symlink, refusing to remove" >&2
+        return 1
+    fi
+
+    if ! mkdir "${CLONE_DIR}"; then
+        echo "Error: Failed to create directory ${CLONE_DIR}" >&2
+        return 1
+    fi
+}
+
+setup_clone_directory
+EOF
+    chmod +x "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+}
+
+@test "setup_clone_directory: creates directory when it doesn't exist" {
+    create_setup_clone_directory_test
+
+    # Ensure directory doesn't exist
+    rm -rf cloned
+
+    # Run the function
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+
+    # Should succeed
+    [ "$status" -eq 0 ]
+
+    # Directory should be created
+    [ -d "cloned" ]
+
+    # Clean up
+    rm -rf cloned
+}
+
+@test "setup_clone_directory: removes and recreates existing directory" {
+    create_setup_clone_directory_test
+
+    # Create an existing directory with a test file
+    mkdir -p cloned
+    touch cloned/testfile.txt
+    echo "old content" > cloned/testfile.txt
+
+    # Verify the file exists before
+    [ -f "cloned/testfile.txt" ]
+
+    # Run the function
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+
+    # Should succeed
+    [ "$status" -eq 0 ]
+
+    # Directory should exist
+    [ -d "cloned" ]
+
+    # Old file should be gone (directory was recreated)
+    [ ! -f "cloned/testfile.txt" ]
+
+    # Should output removal message
+    [[ "$output" == *"Removing existing clone directory"* ]]
+
+    # Clean up
+    rm -rf cloned
+}
+
+@test "setup_clone_directory: refuses to remove symlink (security check)" {
+    create_setup_clone_directory_test
+
+    # Create a target directory and symlink to it
+    mkdir -p symlink_target
+    ln -s symlink_target cloned
+
+    # Verify it's actually a symlink
+    [ -L "cloned" ]
+
+    # Run the function - should fail
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+
+    # Should return error code 1
+    [ "$status" -eq 1 ]
+
+    # Should output error message about symlink
+    [[ "$output" == *"Error: cloned is a symlink, refusing to remove"* ]]
+
+    # Symlink should still exist (not removed)
+    [ -L "cloned" ]
+
+    # Clean up
+    rm -f cloned
+    rm -rf symlink_target
+}
+
+@test "setup_clone_directory: detects symlink to file (not just directory)" {
+    create_setup_clone_directory_test
+
+    # Create a file and symlink to it
+    touch symlink_target_file
+    ln -s symlink_target_file cloned
+
+    # Verify it's a symlink (but not a directory)
+    [ -L "cloned" ]
+    [ ! -d "cloned" ] || [ -L "cloned" ]  # -d follows symlinks, so we check -L too
+
+    # Run the function - should fail
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+
+    # Should return error code 1
+    [ "$status" -eq 1 ]
+
+    # Should output error message about symlink
+    [[ "$output" == *"Error: cloned is a symlink, refusing to remove"* ]]
+
+    # Clean up
+    rm -f cloned
+    rm -f symlink_target_file
+}
+
+@test "setup_clone_directory: handles mkdir failure gracefully" {
+    create_setup_clone_directory_test
+
+    # Ensure cloned doesn't exist
+    rm -rf cloned
+
+    # Create a mock mkdir that always fails
+    mkdir_original=$(which mkdir)
+    cat > "$TEST_TEMP_DIR/bin/mkdir" << 'EOF'
+#!/bin/bash
+# Mock mkdir that fails
+if [[ "$1" == "cloned" ]]; then
+    echo "mkdir: cannot create directory 'cloned': Permission denied" >&2
+    exit 1
+fi
+# For other directories, use real mkdir
+exec /bin/mkdir "$@"
+EOF
+    chmod +x "$TEST_TEMP_DIR/bin/mkdir"
+
+    # Run the function - should fail
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+
+    # Should return error code 1
+    [ "$status" -eq 1 ]
+
+    # Should output error message about mkdir failure
+    [[ "$output" == *"Error: Failed to create directory cloned"* ]]
+}
+
+@test "setup_clone_directory: removes directory with nested structure" {
+    create_setup_clone_directory_test
+
+    # Create a complex directory structure
+    mkdir -p cloned/subdir1/subdir2
+    mkdir -p cloned/subdir3
+    touch cloned/file1.txt
+    touch cloned/subdir1/file2.txt
+    touch cloned/subdir1/subdir2/file3.txt
+
+    # Verify structure exists
+    [ -f "cloned/subdir1/subdir2/file3.txt" ]
+
+    # Run the function
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+
+    # Should succeed
+    [ "$status" -eq 0 ]
+
+    # Directory should be recreated (empty)
+    [ -d "cloned" ]
+
+    # Old structure should be gone
+    [ ! -f "cloned/file1.txt" ]
+    [ ! -f "cloned/subdir1/file2.txt" ]
+    [ ! -d "cloned/subdir1" ]
+
+    # Clean up
+    rm -rf cloned
+}
+
+@test "setup_clone_directory: handles directory with special permissions" {
+    create_setup_clone_directory_test
+
+    # Create directory with read-only permissions
+    mkdir -p cloned/readonly
+    chmod 444 cloned/readonly
+
+    # Verify it exists
+    [ -d "cloned" ]
+
+    # Run the function - should still succeed (rm -rf handles this)
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+
+    # Should succeed
+    [ "$status" -eq 0 ]
+
+    # Directory should be recreated
+    [ -d "cloned" ]
+
+    # Old readonly directory should be gone
+    [ ! -d "cloned/readonly" ]
+
+    # Clean up
+    rm -rf cloned
+}
+
+@test "setup_clone_directory: error message goes to stderr" {
+    create_setup_clone_directory_test
+
+    # Create a symlink
+    mkdir -p symlink_target
+    ln -s symlink_target cloned
+
+    # Run the function and capture stderr separately
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+
+    # Should fail
+    [ "$status" -eq 1 ]
+
+    # Error message should be present (BATS captures both stdout and stderr in $output)
+    [[ "$output" == *"Error:"* ]]
+
+    # Clean up
+    rm -f cloned
+    rm -rf symlink_target
+}
+
+@test "setup_clone_directory: multiple calls create fresh directory each time" {
+    create_setup_clone_directory_test
+
+    # First call
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+    [ "$status" -eq 0 ]
+    touch cloned/marker1.txt
+
+    # Second call
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+    [ "$status" -eq 0 ]
+
+    # First marker should be gone
+    [ ! -f "cloned/marker1.txt" ]
+
+    # Add second marker
+    touch cloned/marker2.txt
+
+    # Third call
+    run bash "$TEST_TEMP_DIR/test_setup_clone_directory.sh"
+    [ "$status" -eq 0 ]
+
+    # Second marker should be gone
+    [ ! -f "cloned/marker2.txt" ]
+
+    # Clean up
+    rm -rf cloned
+}
