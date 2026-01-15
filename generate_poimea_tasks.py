@@ -5,6 +5,7 @@ Generates daily tasks and tracks progress for the Poimea book and animation proj
 """
 
 import json
+import random
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -258,7 +259,6 @@ python3 generate_poimea_tasks.py
             "🌅 Write during your peak energy time"
         ]
 
-        import random
         selected_tips = random.sample(tips, 3)
         for tip in selected_tips:
             md += f"- {tip}\n"
@@ -457,7 +457,6 @@ def generate_progress_report(project: Dict) -> str:
         "\"One day I will find the right words, and they will be simple.\" - Jack Kerouac"
     ]
 
-    import random
     md += f"{random.choice(motivational_quotes)}\n\n"
     md += f"**You've got this! Keep writing, keep creating, keep bringing Poimea to life!** 🚀\n\n"
     md += "---\n\n"
